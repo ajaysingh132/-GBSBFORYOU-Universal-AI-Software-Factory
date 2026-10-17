@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.env
+# Local app state
+/data/
+*.db
+# Frontend
+node_modules/
+dist/
+.env.local
