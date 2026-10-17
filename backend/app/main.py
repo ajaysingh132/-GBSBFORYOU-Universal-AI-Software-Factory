@@ -5,7 +5,7 @@ from .schemas import ProjectPlanRequest, ProjectPlanResponse, PlanStep
 from .providers import configured_providers, generate_text, ProviderNotImplemented
 from .repository_intel import analyze_public_repository, RepositoryAnalysisError
 from .external_research import search_github_repositories, ResearchError
-from .project_store import create_project, list_projects, get_project, save_blueprint, list_blueprints
+from .project_store import create_project, list_projects, get_project, save_blueprint, list_blueprints, create_task, list_tasks, update_task
 
 app = FastAPI(
     title="GBSBFORYOU Universal AI Software Factory API",
@@ -206,7 +206,7 @@ def capabilities():
             "public GitHub repository metadata analyzer",
             "source-linked public GitHub repository research",
             "server-side AI text generation adapters for five providers",
-            "AI-generated project blueprint endpoint with persistence",
+            "AI-generated project blueprint endpoint with persistence",\n            "persistent project task tracking with evidence-gated verification",
         ],
         "planned": [
             "GitHub OAuth and private repository inventory",
@@ -248,6 +248,42 @@ def get_projects(limit: int = 50):
     if limit < 1 or limit > 100:
         raise HTTPException(status_code=422, detail="limit must be between 1 and 100")
     return {"projects": list_projects(limit)}
+
+
+@app.post("/api/v1/projects/{project_id}/tasks", tags=["tasks"])
+def add_project_task(project_id: str, payload: dict):
+    title = payload.get("title", "")
+    description = payload.get("description", "")
+    if not isinstance(title, str) or not 3 <= len(title.strip()) <= 160:
+        raise HTTPException(status_code=422, detail="title must contain 3–160 characters.")
+    if not isinstance(description, str) or len(description) > 2000:
+        raise HTTPException(status_code=422, detail="description must be 2000 characters or fewer.")
+    task = create_task(project_id, title, description)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return task
+
+
+@app.get("/api/v1/projects/{project_id}/tasks", tags=["tasks"])
+def get_project_tasks(project_id: str):
+    if get_project(project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"project_id": project_id, "tasks": list_tasks(project_id)}
+
+
+@app.patch("/api/v1/projects/{project_id}/tasks/{task_id}", tags=["tasks"])
+def patch_project_task(project_id: str, task_id: str, payload: dict):
+    status = payload.get("status", "")
+    evidence = payload.get("evidence", "")
+    if not isinstance(status, str) or not isinstance(evidence, str):
+        raise HTTPException(status_code=422, detail="status and evidence must be text.")
+    try:
+        task = update_task(project_id, task_id, status, evidence)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task or project not found")
+    return task
 
 
 @app.get("/api/v1/projects/{project_id}/blueprints", tags=["projects"])
