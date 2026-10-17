@@ -25,3 +25,12 @@ def test_repository_endpoint_requires_url():
     response = client.post("/api/v1/repositories/analyze", json={})
     assert response.status_code == 422
     assert "URL" in response.json()["detail"]
+
+def test_external_research_rejects_short_query():
+    response = client.get("/api/v1/research/github", params={"q": "ai"})
+    assert response.status_code == 422
+    assert "3 characters" in response.json()["detail"]
+
+def test_external_research_rejects_missing_query():
+    response = client.get("/api/v1/research/github")
+    assert response.status_code == 422
