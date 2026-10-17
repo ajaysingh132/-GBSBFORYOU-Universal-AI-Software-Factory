@@ -5,6 +5,7 @@ from .schemas import ProjectPlanRequest, ProjectPlanResponse, PlanStep
 from .providers import configured_providers
 from .repository_intel import analyze_public_repository, RepositoryAnalysisError
 from .external_research import search_github_repositories, ResearchError
+from .project_store import create_project, list_projects, get_project
 
 app = FastAPI(
     title="GBSBFORYOU Universal AI Software Factory API",
@@ -45,6 +46,7 @@ def capabilities():
             "health",
             "capabilities",
             "project-plan scaffold",
+            "SQLite persistent project brain",
             "public GitHub repository metadata analyzer",
             "source-linked public GitHub repository research",
         ],
@@ -71,6 +73,31 @@ async def research_github(q: str, limit: int = 8):
             status_code=502,
             detail="GitHub search failed; retry later.",
         ) from exc
+
+
+@app.post("/api/v1/projects", tags=["projects"])
+def save_project(payload: ProjectPlanRequest):
+    return create_project(
+        name=payload.name,
+        goal=payload.goal,
+        constraints=payload.constraints,
+        repository_urls=[str(url) for url in payload.repository_urls],
+    )
+
+
+@app.get("/api/v1/projects", tags=["projects"])
+def get_projects(limit: int = 50):
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 100")
+    return {"projects": list_projects(limit)}
+
+
+@app.get("/api/v1/projects/{project_id}", tags=["projects"])
+def get_project_detail(project_id: str):
+    project = get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
 
 
 @app.post("/api/v1/repositories/analyze", tags=["repositories"])
