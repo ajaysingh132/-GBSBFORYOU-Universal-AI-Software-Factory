@@ -206,7 +206,8 @@ def capabilities():
             "public GitHub repository metadata analyzer",
             "source-linked public GitHub repository research",
             "server-side AI text generation adapters for five providers",
-            "AI-generated project blueprint endpoint with persistence",\n            "persistent project task tracking with evidence-gated verification",
+            "AI-generated project blueprint endpoint with persistence",
+            "persistent project task tracking with evidence-gated verification",
         ],
         "planned": [
             "GitHub OAuth and private repository inventory",
