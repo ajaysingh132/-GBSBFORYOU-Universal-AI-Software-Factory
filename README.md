@@ -15,7 +15,7 @@
 
 ## Repository structure
 - `frontend/` — React + TypeScript + Vite responsive PWA.
-- `backend/app/` — FastAPI API, request/response schemas, SQLite project brain, public repository analyzer and external GitHub research.
+- `backend/app/` — FastAPI API, request/response schemas, SQLite project brain, public repository analyzer, external GitHub research and server-side AI provider adapters.
 - `backend/test_main.py` — API smoke tests.
 - `docs/ARCHITECTURE.md` — architecture and staged implementation.
 - `docs/REPOSITORY_RESEARCH_TEMPLATE.md` — evidence-first review template.
@@ -41,7 +41,7 @@ npm run dev -- --host 0.0.0.0
 ```
 Set `VITE_API_BASE_URL` if the API is not on localhost:8000. PWA installability requires HTTPS or localhost.
 
-## Security and evidence rules
+## AI provider setup\nThe `/api/v1/ai/generate` endpoint supports OpenAI, Anthropic, Google Gemini, DeepSeek and OpenRouter adapters. Set the relevant provider API key as a backend environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, or `OPENROUTER_API_KEY`). Optional model overrides use `OPENAI_MODEL`, `ANTHROPIC_MODEL`, `GOOGLE_GEMINI_MODEL`, `DEEPSEEK_MODEL`, and `OPENROUTER_MODEL`. Provider availability, model names, account permissions and billing vary; an adapter does not imply a free plan. Never place keys in frontend code.\n\n## Security and evidence rules
 - Never put model/GitHub secrets in browser code or commit them.
 - Only inspect repositories the user has authorized; minimize permissions.
 - Do not execute untrusted repository code in the API process.
