@@ -546,3 +546,62 @@ def test_worker_result_requires_terminal_state_and_valid_check_states():
     result = {"job_id": "job-1", "state": "running", "manifest_sha256": "c" * 64, "checks": []}
     with pytest.raises(WorkerProtocolError, match="terminal"):
         validate_worker_result(result)
+
+
+def test_test_job_queue_requires_human_acceptance_and_never_claims_execution(monkeypatch, tmp_path):
+    import app.main as main_module
+    from app.project_store import create_project, create_task
+
+    monkeypatch.setenv("FACTORY_DB_PATH", str(tmp_path / "worker-queue.db"))
+    project = create_project("Factory", "Build a safe test queue", [], [])
+    task = create_task(project["id"], "Create a health check")
+
+    async def fake_generate(provider, prompt):
+        return {
+            "provider": provider,
+            "model": "test-model",
+            "text": '[{"path":"src/health.py","content":"def health():\\n    return True\\n"}]',
+        }
+
+    monkeypatch.setattr(main_module, "generate_text", fake_generate)
+    created = client.post(
+        f"/api/v1/projects/{project['id']}/tasks/{task['id']}/code-proposals",
+        json={"provider": "openai"},
+    )
+    assert created.status_code == 200
+    proposal_id = created.json()["id"]
+    queue_url = f"/api/v1/projects/{project['id']}/code-proposals/{proposal_id}/test-jobs"
+
+    blocked = client.post(queue_url)
+    assert blocked.status_code == 409
+
+    reviewed = client.patch(
+        f"/api/v1/projects/{project['id']}/code-proposals/{proposal_id}/review",
+        json={"status": "accepted_for_testing", "review_note": "Reviewed for isolated test queue"},
+    )
+    assert reviewed.status_code == 200
+
+    queued = client.post(queue_url)
+    assert queued.status_code == 200
+    body = queued.json()
+    assert body["job"]["state"] == "queued"
+    assert body["execution_status"] == "not_started"
+    assert "No code has been written or executed" in body["message"]
+
+    job_id = body["job"]["id"]
+    fetched = client.get(f"/api/v1/projects/{project['id']}/test-jobs/{job_id}")
+    assert fetched.status_code == 200
+    assert fetched.json()["job"]["state"] == "queued"
+    assert fetched.json()["execution_status"] == "not_started"
+    assert fetched.json()["result"] == {}
+
+
+def test_test_job_queue_rejects_unknown_proposal(tmp_path, monkeypatch):
+    from app.project_store import create_project
+
+    monkeypatch.setenv("FACTORY_DB_PATH", str(tmp_path / "worker-queue-unknown.db"))
+    project = create_project("Factory", "Build a safe test queue", [], [])
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/code-proposals/not-found/test-jobs"
+    )
+    assert response.status_code == 404
