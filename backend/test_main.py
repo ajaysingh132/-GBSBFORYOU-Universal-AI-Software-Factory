@@ -169,3 +169,43 @@ def test_research_blueprint_combines_evidence_and_persists(monkeypatch, tmp_path
     assert data["evidence"]["user_supplied_public_repository_reviews"][0]["status"] == "analyzed"
     assert data["evidence"]["public_github_searches"][0]["results"][0]["name"] == "org/tool"
     assert data["blueprint"] == "Evidence-informed blueprint"
+
+
+def test_project_task_lifecycle_and_evidence_gate(tmp_path, monkeypatch):
+    monkeypatch.setenv("FACTORY_DB_PATH", str(tmp_path / "tasks.db"))
+    created = client.post("/api/v1/projects", json={
+        "name": "Task Project", "goal": "Build a mobile-first app",
+        "constraints": [], "repository_urls": []
+    })
+    assert created.status_code == 200
+    project_id = created.json()["id"]
+    task_response = client.post(f"/api/v1/projects/{project_id}/tasks", json={
+        "title": "Review repository license", "description": "Check the actual license file."
+    })
+    assert task_response.status_code == 200
+    task = task_response.json()
+    assert task["status"] == "proposed"
+    blocked = client.patch(f"/api/v1/projects/{project_id}/tasks/{task['id']}", json={
+        "status": "verified", "evidence": ""
+    })
+    assert blocked.status_code == 422
+    verified = client.patch(f"/api/v1/projects/{project_id}/tasks/{task['id']}", json={
+        "status": "verified", "evidence": "Reviewed LICENSE file at commit abc123"
+    })
+    assert verified.status_code == 200
+    assert verified.json()["status"] == "verified"
+    assert "LICENSE" in verified.json()["evidence"]
+    listed = client.get(f"/api/v1/projects/{project_id}/tasks")
+    assert listed.status_code == 200
+    assert listed.json()["tasks"][0]["id"] == task["id"]
+
+
+def test_project_task_rejects_unknown_status(tmp_path, monkeypatch):
+    monkeypatch.setenv("FACTORY_DB_PATH", str(tmp_path / "task-status.db"))
+    project = client.post("/api/v1/projects", json={
+        "name": "Task Project", "goal": "Build a mobile-first app",
+        "constraints": [], "repository_urls": []
+    }).json()
+    task = client.post(f"/api/v1/projects/{project['id']}/tasks", json={"title": "Inspect code"}).json()
+    response = client.patch(f"/api/v1/projects/{project['id']}/tasks/{task['id']}", json={"status": "done"})
+    assert response.status_code == 422
