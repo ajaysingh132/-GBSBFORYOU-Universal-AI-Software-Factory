@@ -130,3 +130,42 @@ def test_project_store_saves_and_lists_blueprints(tmp_path, monkeypatch):
     assert len(history) == 1
     assert history[0]["content"] == "Milestone plan"
     assert history[0]["provider"] == "openai"
+
+
+def test_research_blueprint_validates_repository_and_query_limits():
+    response = client.post("/api/v1/projects/research-blueprint", json={
+        "name": "Video Studio", "goal": "Build a mobile-first AI video creation application",
+        "provider": "openai", "repository_urls": ["https://github.com/a/b"] * 11,
+        "research_queries": []
+    })
+    assert response.status_code == 422
+
+
+def test_research_blueprint_combines_evidence_and_persists(monkeypatch, tmp_path):
+    import app.main as main_module
+    monkeypatch.setenv("FACTORY_DB_PATH", str(tmp_path / "research-blueprint.db"))
+    async def fake_repo(url):
+        return {"repository": url, "license": "MIT", "files": ["README.md"], "status": "analyzed"}
+    async def fake_search(query, limit=5):
+        return {"query": query, "results": [{"name": "org/tool", "url": "https://github.com/org/tool", "license_spdx": "MIT"}]}
+    async def fake_generate(provider, prompt):
+        assert "org/tool" in prompt
+        assert "https://github.com/a/repo" in prompt
+        return {"provider": provider, "model": "test-model", "text": "Evidence-informed blueprint"}
+    monkeypatch.setattr(main_module, "analyze_public_repository", fake_repo)
+    monkeypatch.setattr(main_module, "search_github_repositories", fake_search)
+    monkeypatch.setattr(main_module, "generate_text", fake_generate)
+    response = client.post("/api/v1/projects/research-blueprint", json={
+        "name": "Video Studio",
+        "goal": "Build a mobile-first AI video creation application",
+        "provider": "openai",
+        "constraints": ["prefer free tools"],
+        "repository_urls": ["https://github.com/a/repo"],
+        "research_queries": ["AI video generation"]
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "generated_and_saved"
+    assert data["evidence"]["user_supplied_public_repository_reviews"][0]["status"] == "analyzed"
+    assert data["evidence"]["public_github_searches"][0]["results"][0]["name"] == "org/tool"
+    assert data["blueprint"] == "Evidence-informed blueprint"
