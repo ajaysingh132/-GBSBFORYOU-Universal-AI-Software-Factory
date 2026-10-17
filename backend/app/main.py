@@ -2,7 +2,7 @@ import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from .schemas import ProjectPlanRequest, ProjectPlanResponse, PlanStep
-from .providers import configured_providers
+from .providers import configured_providers, generate_text, ProviderNotImplemented
 from .repository_intel import analyze_public_repository, RepositoryAnalysisError
 from .external_research import search_github_repositories, ResearchError
 from .project_store import create_project, list_projects, get_project
@@ -38,6 +38,24 @@ def health():
     }
 
 
+@app.post("/api/v1/ai/generate", tags=["ai"])
+async def ai_generate(payload: dict):
+    provider = payload.get("provider", "")
+    prompt = payload.get("prompt", "")
+    if not isinstance(provider, str) or provider not in {
+        "openai", "anthropic", "google_gemini", "deepseek", "openrouter"
+    }:
+        raise HTTPException(status_code=422, detail="Unsupported provider.")
+    if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 30000:
+        raise HTTPException(status_code=422, detail="prompt must contain 1–30000 characters.")
+    try:
+        return await generate_text(provider, prompt)
+    except ProviderNotImplemented as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @app.get("/api/v1/capabilities", tags=["system"])
 def capabilities():
     return {
@@ -49,6 +67,7 @@ def capabilities():
             "SQLite persistent project brain",
             "public GitHub repository metadata analyzer",
             "source-linked public GitHub repository research",
+            "server-side AI text generation adapters for five providers",
         ],
         "planned": [
             "GitHub OAuth and private repository inventory",
