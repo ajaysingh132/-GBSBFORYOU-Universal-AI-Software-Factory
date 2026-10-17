@@ -213,6 +213,37 @@ def create_code_proposal(project_id: str, task_id: str, provider: str, model: st
     return proposal
 
 
+def update_code_proposal_review(project_id: str, proposal_id: str, status: str, review_note: str = "") -> dict | None:
+    """Record a human review decision; this does not run or approve deployment."""
+    allowed = {"accepted_for_testing", "rejected"}
+    if status not in allowed:
+        raise ValueError("status must be accepted_for_testing or rejected")
+    if not isinstance(review_note, str) or len(review_note) > 2000:
+        raise ValueError("review_note must be text up to 2000 characters")
+    with _connect() as db:
+        row = db.execute(
+            "SELECT * FROM code_proposals WHERE id = ? AND project_id = ?",
+            (proposal_id, project_id),
+        ).fetchone()
+        if not row:
+            return None
+        db.execute(
+            "UPDATE code_proposals SET status = ?, evidence_note = ? WHERE id = ? AND project_id = ?",
+            (status, review_note.strip() or (
+                "Human review decision recorded: accepted for isolated testing only; no execution, tests, merge, or deployment occurred."
+                if status == "accepted_for_testing"
+                else "Human review decision recorded: rejected; no execution, tests, merge, or deployment occurred."
+            ), proposal_id, project_id),
+        )
+        updated = db.execute(
+            "SELECT * FROM code_proposals WHERE id = ? AND project_id = ?",
+            (proposal_id, project_id),
+        ).fetchone()
+    item = dict(updated)
+    item["files"] = json.loads(item.pop("files_json"))
+    return item
+
+
 def list_code_proposals(project_id: str, task_id: str | None = None) -> list[dict]:
     with _connect() as db:
         if task_id:
