@@ -23,3 +23,45 @@ jobs:
           node-version: '20'
       - run: cd frontend && npm install
       - run: cd frontend && npm run build
+
+  app-smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: pip install -r backend/requirements.txt
+      - run: cd frontend && npm install
+      - name: Start API and verify health endpoints
+        run: |
+          cd backend
+          uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/factory-api.log 2>&1 &
+          echo $! > /tmp/factory-api.pid
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/health > /tmp/factory-health.json; then break; fi
+            sleep 1
+          done
+          cat /tmp/factory-health.json
+          python -c "import json; d=json.load(open('/tmp/factory-health.json')); assert d['status']=='ok'"
+          curl --fail --silent http://127.0.0.1:8000/openapi.json | python -c "import json,sys; d=json.load(sys.stdin); assert '/health' in d['paths']; assert '/api/v1/projects/{project_id}/code-proposals/{proposal_id}/test-jobs' in d['paths']; print('OpenAPI smoke test passed')"
+      - name: Build frontend and run preview server
+        run: |
+          cd frontend
+          npm run build
+          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/factory-web.log 2>&1 &
+          echo $! > /tmp/factory-web.pid
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4173/ > /tmp/factory-index.html; then break; fi
+            sleep 1
+          done
+          grep -q '<div id="root"></div>' /tmp/factory-index.html
+          echo "Frontend preview smoke test passed"
+      - name: Show server logs on failure
+        if: failure()
+        run: |
+          cat /tmp/factory-api.log || true
+          cat /tmp/factory-web.log || true
