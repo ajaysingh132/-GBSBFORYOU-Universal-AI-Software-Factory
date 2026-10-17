@@ -307,3 +307,50 @@ def test_code_proposal_rejects_path_traversal_without_saving(monkeypatch, tmp_pa
     )
     assert response.status_code == 502
     assert client.get(f"/api/v1/projects/{project['id']}/code-proposals").json()["proposals"] == []
+
+
+
+def test_code_proposal_manifest_is_read_only_and_hashes_contents(monkeypatch, tmp_path):
+    import hashlib
+    import app.main as main_module
+    from app.project_store import create_project, create_task
+    monkeypatch.setenv("FACTORY_DB_PATH", str(tmp_path / "manifest.db"))
+    project = create_project("Factory", "Build a testable software factory", [], [])
+    task = create_task(project["id"], "Add health test")
+
+    async def fake_generate(provider, prompt):
+        return {"provider": provider, "model": "test-model", "text": '[{"path":"backend/test_ok.py","content":"assert True"}]'}
+
+    monkeypatch.setattr(main_module, "generate_text", fake_generate)
+    created = client.post(
+        f"/api/v1/projects/{project['id']}/tasks/{task['id']}/code-proposals",
+        json={"provider": "openai"},
+    )
+    assert created.status_code == 200
+    proposal_id = created.json()["id"]
+    response = client.get(f"/api/v1/projects/{project['id']}/code-proposals/{proposal_id}/manifest")
+    assert response.status_code == 200
+    manifest = response.json()
+    assert manifest["files"][0]["sha256"] == hashlib.sha256(b"assert True").hexdigest()
+    assert manifest["checks"]["automated_tests"] == "not_run"
+    assert manifest["checks"]["isolated_build"] == "not_run"
+    assert manifest["status"] == "verification_pending"
+
+
+def test_code_proposal_rejects_windows_drive_path(monkeypatch, tmp_path):
+    import app.main as main_module
+    from app.project_store import create_project, create_task
+    monkeypatch.setenv("FACTORY_DB_PATH", str(tmp_path / "windows-path.db"))
+    project = create_project("Factory", "Build a testable software factory", [], [])
+    task = create_task(project["id"], "Add safe file")
+
+    async def fake_generate(provider, prompt):
+        return {"provider": provider, "model": "test-model", "text": '[{"path":"C:/secret.txt","content":"not allowed"}]'}
+
+    monkeypatch.setattr(main_module, "generate_text", fake_generate)
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/tasks/{task['id']}/code-proposals",
+        json={"provider": "openai"},
+    )
+    assert response.status_code == 502
+    assert client.get(f"/api/v1/projects/{project['id']}/code-proposals").json()["proposals"] == []
