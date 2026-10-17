@@ -265,6 +265,62 @@ def add_project_task(project_id: str, payload: dict):
     return task
 
 
+@app.post("/api/v1/projects/{project_id}/tasks/from-blueprint", tags=["tasks"])
+async def create_tasks_from_blueprint(project_id: str, payload: dict):
+    """Ask a configured provider to convert the latest saved blueprint into actionable tasks."""
+    project = get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    history = list_blueprints(project_id)
+    if not history:
+        raise HTTPException(status_code=409, detail="Create and save a blueprint before generating tasks.")
+    provider = payload.get("provider", history[0]["provider"])
+    allowed = {"openai", "anthropic", "google_gemini", "deepseek", "openrouter"}
+    if provider not in allowed:
+        raise HTTPException(status_code=422, detail="Unsupported provider.")
+    blueprint = history[0]["content"]
+    instruction = (
+        "Convert this software project blueprint into 4 to 8 actionable implementation tasks. "
+        "Return ONLY a JSON array, each item with string keys title and description. "
+        "Titles must be concise, testable and distinct. Do not claim any task is completed or verified. "
+        "Include research/license review, architecture, implementation, tests and deployment-readiness where relevant. "
+        "Project goal: " + project["goal"] + "\\nBlueprint: " + blueprint[:14000]
+    )
+    try:
+        result = await generate_text(provider, instruction)
+    except ProviderNotImplemented as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    import json
+    try:
+        text_value = result["text"].strip()
+        if text_value.startswith("```"):
+            text_value = text_value.split("\\n", 1)[-1]
+            if text_value.endswith("```"):
+                text_value = text_value[:-3].strip()
+        start, end = text_value.find("["), text_value.rfind("]")
+        items = json.loads(text_value[start:end + 1]) if start >= 0 and end > start else None
+        if not isinstance(items, list) or not 1 <= len(items) <= 12:
+            raise ValueError("Expected a JSON array with 1–12 tasks.")
+        tasks = []
+        for item in items:
+            if not isinstance(item, dict) or not isinstance(item.get("title"), str) or not 3 <= len(item["title"].strip()) <= 160:
+                raise ValueError("Each task must have a title of 3–160 characters.")
+            description = item.get("description", "")
+            if not isinstance(description, str) or len(description) > 2000:
+                raise ValueError("Task descriptions must be text up to 2000 characters.")
+            tasks.append((item["title"].strip(), description.strip()))
+    except (ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=502, detail="Provider did not return a valid task JSON array; no tasks were created.") from exc
+    created = []
+    for title, description in tasks:
+        task = create_task(project_id, title, description)
+        if task:
+            created.append(task)
+    return {"project_id": project_id, "provider": result["provider"], "model": result["model"], "created_count": len(created), "tasks": created, "status": "proposed", "evidence_note": "AI-proposed tasks only; each task requires implementation and evidence before verification."}
+
+
 @app.get("/api/v1/projects/{project_id}/tasks", tags=["tasks"])
 def get_project_tasks(project_id: str):
     if get_project(project_id) is None:
