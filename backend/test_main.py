@@ -354,3 +354,49 @@ def test_code_proposal_rejects_windows_drive_path(monkeypatch, tmp_path):
     )
     assert response.status_code == 502
     assert client.get(f"/api/v1/projects/{project['id']}/code-proposals").json()["proposals"] == []
+
+
+
+def test_code_proposal_download_is_review_only_zip(monkeypatch, tmp_path):
+    import io
+    import zipfile
+    import app.main as main_module
+    from app.project_store import create_project, create_task
+    monkeypatch.setenv("FACTORY_DB_PATH", str(tmp_path / "proposal-download.db"))
+    project = create_project("Factory", "Build a testable software factory", [], [])
+    task = create_task(project["id"], "Add health endpoint test")
+
+    async def fake_generate(provider, prompt):
+        return {
+            "provider": provider, "model": "test-model",
+            "text": '[{"path":"backend/test_health.py","content":"def test_health():\\n    assert True\\n"}]'
+        }
+
+    monkeypatch.setattr(main_module, "generate_text", fake_generate)
+    created = client.post(
+        f"/api/v1/projects/{project['id']}/tasks/{task['id']}/code-proposals",
+        json={"provider": "openai"},
+    )
+    assert created.status_code == 200
+    proposal_id = created.json()["id"]
+    response = client.get(
+        f"/api/v1/projects/{project['id']}/code-proposals/{proposal_id}/download"
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/zip")
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        names = archive.namelist()
+        assert "REVIEW_REQUIRED.txt" in names
+        assert "proposed/backend/test_health.py" in names
+        assert b"NOT tested or verified" in archive.read("REVIEW_REQUIRED.txt")
+        assert b"def test_health" in archive.read("proposed/backend/test_health.py")
+
+
+def test_code_proposal_download_returns_404_for_unknown_proposal(tmp_path, monkeypatch):
+    from app.project_store import create_project
+    monkeypatch.setenv("FACTORY_DB_PATH", str(tmp_path / "unknown-proposal.db"))
+    project = create_project("Factory", "Build a testable software factory", [], [])
+    response = client.get(
+        f"/api/v1/projects/{project['id']}/code-proposals/not-a-proposal/download"
+    )
+    assert response.status_code == 404
