@@ -5,7 +5,7 @@ from .schemas import ProjectPlanRequest, ProjectPlanResponse, PlanStep
 from .providers import configured_providers, generate_text, ProviderNotImplemented
 from .repository_intel import analyze_public_repository, RepositoryAnalysisError
 from .external_research import search_github_repositories, ResearchError
-from .project_store import create_project, list_projects, get_project
+from .project_store import create_project, list_projects, get_project, save_blueprint, list_blueprints
 
 app = FastAPI(
     title="GBSBFORYOU Universal AI Software Factory API",
@@ -85,13 +85,29 @@ async def create_ai_blueprint(payload: dict):
     )
     try:
         result = await generate_text(provider, instruction)
+        evidence_note = "This is an AI-generated plan, not proof that repositories were inspected, code was generated, tests passed, or deployment succeeded."
+        project = create_project(
+            name=name.strip(),
+            goal=goal.strip(),
+            constraints=constraints[:30],
+            repository_urls=[],
+        )
+        saved = save_blueprint(
+            project_id=project["id"],
+            provider=result["provider"],
+            model=result["model"],
+            content=result["text"],
+            evidence_note=evidence_note,
+        )
         return {
+            "project_id": project["id"],
+            "blueprint_id": saved["id"] if saved else None,
             "project_name": name.strip(),
             "provider": result["provider"],
             "model": result["model"],
-            "status": "generated",
+            "status": "generated_and_saved" if saved else "generated_not_saved",
             "blueprint": result["text"],
-            "evidence_note": "This is an AI-generated plan, not proof that repositories were inspected, code was generated, tests passed, or deployment succeeded."
+            "evidence_note": evidence_note,
         }
     except ProviderNotImplemented as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -111,7 +127,7 @@ def capabilities():
             "public GitHub repository metadata analyzer",
             "source-linked public GitHub repository research",
             "server-side AI text generation adapters for five providers",
-            "AI-generated project blueprint endpoint (plan only)",
+            "AI-generated project blueprint endpoint with persistence",
         ],
         "planned": [
             "GitHub OAuth and private repository inventory",
@@ -153,6 +169,13 @@ def get_projects(limit: int = 50):
     if limit < 1 or limit > 100:
         raise HTTPException(status_code=422, detail="limit must be between 1 and 100")
     return {"projects": list_projects(limit)}
+
+
+@app.get("/api/v1/projects/{project_id}/blueprints", tags=["projects"])
+def get_project_blueprints(project_id: str):
+    if get_project(project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"project_id": project_id, "blueprints": list_blueprints(project_id)}
 
 
 @app.get("/api/v1/projects/{project_id}", tags=["projects"])
