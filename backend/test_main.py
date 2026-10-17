@@ -486,3 +486,63 @@ def test_code_proposal_review_rejects_invalid_status(tmp_path, monkeypatch):
         json={"status": "deployed"},
     )
     assert response.status_code == 422
+
+
+def test_worker_protocol_accepts_safe_manifest_and_hashes_files():
+    import hashlib
+    from app.worker_protocol import validate_job_manifest
+
+    manifest = {
+        "proposal_id": "proposal-123",
+        "manifest_sha256": "a" * 64,
+        "files": [{"path": "src/main.py", "content": "print('hello')"}],
+    }
+    result = validate_job_manifest(manifest)
+    assert result["files"][0]["sha256"] == hashlib.sha256(b"print('hello')").hexdigest()
+    assert result["total_bytes"] == len(b"print('hello')")
+
+
+def test_worker_protocol_rejects_unsafe_paths():
+    import pytest
+    from app.worker_protocol import WorkerProtocolError, validate_relative_path
+
+    for path in ("../secret", "/etc/passwd", "C:/Windows/system.ini", "src\\\\evil.py", ".env", "src/../secret"):
+        with pytest.raises(WorkerProtocolError):
+            validate_relative_path(path)
+
+
+def test_worker_protocol_rejects_duplicate_and_oversized_files():
+    import pytest
+    from app.worker_protocol import WorkerProtocolError, validate_job_manifest
+
+    base = {"proposal_id": "p1", "manifest_sha256": "b" * 64}
+    with pytest.raises(WorkerProtocolError, match="duplicate"):
+        validate_job_manifest({**base, "files": [
+            {"path": "src/a.py", "content": "a"},
+            {"path": "src/a.py", "content": "b"},
+        ]})
+    with pytest.raises(WorkerProtocolError, match="exceeds"):
+        validate_job_manifest({**base, "files": [{"path": "src/a.py", "content": "x" * 200_001}]})
+
+
+def test_worker_result_rejects_client_supplied_raw_command():
+    import pytest
+    from app.worker_protocol import WorkerProtocolError, validate_worker_result
+
+    result = {
+        "job_id": "job-1",
+        "state": "completed",
+        "manifest_sha256": "c" * 64,
+        "checks": [{"name": "unit-tests", "state": "passed", "command": "rm -rf /"}],
+    }
+    with pytest.raises(WorkerProtocolError, match="raw commands"):
+        validate_worker_result(result)
+
+
+def test_worker_result_requires_terminal_state_and_valid_check_states():
+    import pytest
+    from app.worker_protocol import WorkerProtocolError, validate_worker_result
+
+    result = {"job_id": "job-1", "state": "running", "manifest_sha256": "c" * 64, "checks": []}
+    with pytest.raises(WorkerProtocolError, match="terminal"):
+        validate_worker_result(result)
