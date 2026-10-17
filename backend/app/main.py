@@ -115,6 +115,85 @@ async def create_ai_blueprint(payload: dict):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@app.post("/api/v1/projects/research-blueprint", tags=["projects"])
+async def create_research_blueprint(payload: dict):
+    """Create a blueprint informed by public repository evidence; no code is generated here."""
+    name = payload.get("name", "")
+    goal = payload.get("goal", "")
+    provider = payload.get("provider", "")
+    constraints = payload.get("constraints", [])
+    repository_urls = payload.get("repository_urls", [])
+    research_queries = payload.get("research_queries", [])
+    allowed = {"openai", "anthropic", "google_gemini", "deepseek", "openrouter"}
+    if not isinstance(name, str) or not 2 <= len(name.strip()) <= 100:
+        raise HTTPException(status_code=422, detail="name must contain 2–100 characters.")
+    if not isinstance(goal, str) or not 10 <= len(goal.strip()) <= 5000:
+        raise HTTPException(status_code=422, detail="goal must contain 10–5000 characters.")
+    if provider not in allowed:
+        raise HTTPException(status_code=422, detail="Unsupported provider.")
+    if not isinstance(constraints, list) or len(constraints) > 30 or any(not isinstance(x, str) for x in constraints):
+        raise HTTPException(status_code=422, detail="constraints must contain at most 30 text values.")
+    if not isinstance(repository_urls, list) or len(repository_urls) > 10 or any(not isinstance(x, str) for x in repository_urls):
+        raise HTTPException(status_code=422, detail="repository_urls must contain at most 10 URL strings.")
+    if not isinstance(research_queries, list) or len(research_queries) > 5 or any(not isinstance(x, str) for x in research_queries):
+        raise HTTPException(status_code=422, detail="research_queries must contain at most 5 text values.")
+    repository_evidence = []
+    research_evidence = []
+    for url in repository_urls:
+        try:
+            evidence = await analyze_public_repository(url)
+            repository_evidence.append(evidence)
+        except (RepositoryAnalysisError, ValueError) as exc:
+            repository_evidence.append({"requested_url": url, "status": "not_verified", "reason": str(exc)})
+        except Exception:
+            repository_evidence.append({"requested_url": url, "status": "not_verified", "reason": "Unexpected repository analysis failure."})
+    for query in research_queries:
+        try:
+            evidence = await search_github_repositories(query, limit=5)
+            research_evidence.append(evidence)
+        except (ResearchError, ValueError) as exc:
+            research_evidence.append({"query": query, "status": "not_verified", "reason": str(exc)})
+        except Exception:
+            research_evidence.append({"query": query, "status": "not_verified", "reason": "Unexpected external research failure."})
+    evidence_bundle = {
+        "user_supplied_public_repository_reviews": repository_evidence,
+        "public_github_searches": research_evidence,
+        "scope_note": "Only returned public GitHub metadata and repository analyzer outputs are available. This is not a complete source-code, dependency, security, model-license or commercial-use audit."
+    }
+    instruction = (
+        "You are the evidence-led planning engine of GBSBFORYOU Universal AI Software Factory. "
+        "Create an implementation blueprint informed by the supplied evidence. Separate observed facts, "
+        "inferences and items still requiring verification. Cite repository URLs in the text. "
+        "Treat missing license as no explicit reuse permission. Do not say private repositories were accessed. "
+        "Do not claim code was generated, tests passed or deployment occurred. "
+        "Include sections: Requirements and acceptance criteria; Evidence reviewed; Candidate reuse options and license caveats; "
+        "Architecture; Milestones; Test/security plan; Risks and unresolved checks. Prefer free/open-source options only when evidence supports it.\n\n"
+        f"Project: {name.strip()}\nGoal: {goal.strip()}\n"
+        f"Constraints: {', '.join(constraints) if constraints else 'None supplied'}\n"
+        f"Evidence JSON: {__import__('json').dumps(evidence_bundle, ensure_ascii=False)[:22000]}"
+    )
+    try:
+        result = await generate_text(provider, instruction)
+    except ProviderNotImplemented as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    evidence_note = "AI-generated plan based on the public repository analysis/search results returned in this request. It is not a complete code/security/license audit and does not prove implementation or tests."
+    project = create_project(
+        name=name.strip(), goal=goal.strip(), constraints=constraints,
+        repository_urls=repository_urls,
+    )
+    saved = save_blueprint(project_id=project["id"], provider=result["provider"],
+        model=result["model"], content=result["text"], evidence_note=evidence_note)
+    return {
+        "project_id": project["id"], "blueprint_id": saved["id"] if saved else None,
+        "project_name": name.strip(), "provider": result["provider"], "model": result["model"],
+        "status": "generated_and_saved" if saved else "generated_not_saved",
+        "blueprint": result["text"], "evidence_note": evidence_note,
+        "evidence": evidence_bundle
+    }
+
+
 @app.get("/api/v1/capabilities", tags=["system"])
 def capabilities():
     return {
