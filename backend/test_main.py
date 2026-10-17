@@ -20,3 +20,8 @@ def test_repository_url_parser_rejects_other_hosts():
     from app.repository_intel import parse_github_repo, RepositoryAnalysisError
     with pytest.raises(RepositoryAnalysisError):
         parse_github_repo("https://example.com/owner/project")
+
+def test_repository_endpoint_requires_url():
+    response = client.post("/api/v1/repositories/analyze", json={})
+    assert response.status_code == 422
+    assert "URL" in response.json()["detail"]
