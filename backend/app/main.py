@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import hashlib
 import zipfile
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -10,7 +11,7 @@ from .code_proposal_tools import build_proposal_manifest
 from .providers import configured_providers, generate_text, ProviderNotImplemented
 from .repository_intel import analyze_public_repository, RepositoryAnalysisError
 from .external_research import search_github_repositories, ResearchError
-from .project_store import create_project, list_projects, get_project, save_blueprint, list_blueprints, create_task, list_tasks, update_task, create_code_proposal, list_code_proposals, update_code_proposal_review, list_code_proposal_reviews
+from .project_store import create_project, list_projects, get_project, save_blueprint, list_blueprints, create_task, list_tasks, update_task, create_code_proposal, list_code_proposals, update_code_proposal_review, list_code_proposal_reviews, enqueue_worker_job, get_worker_job
 
 app = FastAPI(
     title="GBSBFORYOU Universal AI Software Factory API",
@@ -414,6 +415,58 @@ def review_code_proposal(project_id: str, proposal_id: str, payload: dict):
     return {
         **proposal,
         "review_boundary": "Human decision only. No code was written to a workspace, executed, tested, merged, or deployed.",
+    }
+
+
+@app.post("/api/v1/projects/{project_id}/code-proposals/{proposal_id}/test-jobs", tags=["implementation"])
+def queue_code_proposal_test(project_id: str, proposal_id: str):
+    """Create a durable queue record; this endpoint does not start a worker."""
+    if get_project(project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    proposal = next((p for p in list_code_proposals(project_id) if p["id"] == proposal_id), None)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Code proposal not found")
+    if proposal["status"] != "accepted_for_testing":
+        raise HTTPException(status_code=409, detail="Human review must accept this proposal for testing first.")
+    try:
+        summary = build_proposal_manifest(proposal["files"])
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="Proposal failed manifest validation.") from exc
+    worker_manifest = {
+        "proposal_id": proposal_id,
+        "files": [{"path": item["path"], "content": source["content"]}
+                  for item in summary["files"]
+                  for source in proposal["files"] if source["path"] == item["path"]],
+    }
+    canonical = json.dumps(worker_manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    worker_manifest["manifest_sha256"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    try:
+        from .worker_protocol import validate_job_manifest
+        validate_job_manifest(worker_manifest)
+        job = enqueue_worker_job(project_id, proposal_id, worker_manifest)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if job is None:
+        raise HTTPException(status_code=404, detail="Code proposal not found")
+    return {
+        "job": {key: value for key, value in job.items() if key != "manifest"},
+        "message": "Queued for a future isolated worker. No code has been written or executed; build and tests remain not_run.",
+        "execution_status": "not_started",
+    }
+
+
+@app.get("/api/v1/projects/{project_id}/test-jobs/{job_id}", tags=["implementation"])
+def get_code_proposal_test_job(project_id: str, job_id: str):
+    if get_project(project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    job = get_worker_job(project_id, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Test job not found")
+    return {
+        "job": {key: value for key, value in job.items() if key not in {"manifest", "result"}},
+        "result": job["result"],
+        "execution_status": "not_started",
+        "message": "Queue metadata only; no isolated worker is connected yet.",
     }
 
 
