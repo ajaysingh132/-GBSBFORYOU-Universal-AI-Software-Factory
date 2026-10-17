@@ -1,0 +1,14 @@
+# Repository/tool research record
+- Name and canonical source URL:
+- Retrieval date and inspected commit/release:
+- Relevant capabilities:
+- License for code / model weights / datasets / generated assets:
+- Maintenance evidence:
+- Runtime and hardware requirements:
+- API/local operation and free-tier limits:
+- Pricing/compute estimate (source and date):
+- Security/advisory findings:
+- Integration method and permissions:
+- Test/build evidence:
+- Decision: reuse / adapter / reference only / reject:
+- Rationale, caveats and confidence:
