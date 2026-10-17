@@ -34,3 +34,30 @@ def test_external_research_rejects_short_query():
 def test_external_research_rejects_missing_query():
     response = client.get("/api/v1/research/github")
     assert response.status_code == 422
+
+def test_project_brain_persists_and_reads_projects(tmp_path, monkeypatch):
+    monkeypatch.setenv("FACTORY_DB_PATH", str(tmp_path / "factory-test.db"))
+    payload = {
+        "name": "Video Studio",
+        "goal": "Build a mobile-first AI video creation application",
+        "constraints": ["prefer free tools"],
+        "repository_urls": [],
+    }
+    created = client.post("/api/v1/projects", json=payload)
+    assert created.status_code == 200
+    project = created.json()
+    assert project["name"] == "Video Studio"
+    assert project["status"] == "proposed"
+    listed = client.get("/api/v1/projects")
+    assert listed.status_code == 200
+    assert any(item["id"] == project["id"] for item in listed.json()["projects"])
+    detail = client.get(f"/api/v1/projects/{project['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["goal"] == payload["goal"]
+
+def test_project_brain_unknown_id_returns_404():
+    response = client.get("/api/v1/projects/does-not-exist")
+    assert response.status_code == 404
+
+def test_project_brain_limit_validation():
+    assert client.get("/api/v1/projects", params={"limit": 101}).status_code == 422
