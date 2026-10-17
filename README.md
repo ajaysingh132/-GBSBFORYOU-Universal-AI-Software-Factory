@@ -15,7 +15,7 @@
 
 ## Repository structure
 - `frontend/` — React + TypeScript + Vite responsive PWA.
-- `backend/app/` — FastAPI API, request/response schemas and provider adapter boundary.
+- `backend/app/` — FastAPI API, request/response schemas, SQLite project brain, public repository analyzer and external GitHub research.
 - `backend/test_main.py` — API smoke tests.
 - `docs/ARCHITECTURE.md` — architecture and staged implementation.
 - `docs/REPOSITORY_RESEARCH_TEMPLATE.md` — evidence-first review template.
