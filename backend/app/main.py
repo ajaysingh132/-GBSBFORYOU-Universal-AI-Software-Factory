@@ -10,7 +10,7 @@ from .code_proposal_tools import build_proposal_manifest
 from .providers import configured_providers, generate_text, ProviderNotImplemented
 from .repository_intel import analyze_public_repository, RepositoryAnalysisError
 from .external_research import search_github_repositories, ResearchError
-from .project_store import create_project, list_projects, get_project, save_blueprint, list_blueprints, create_task, list_tasks, update_task, create_code_proposal, list_code_proposals, update_code_proposal_review
+from .project_store import create_project, list_projects, get_project, save_blueprint, list_blueprints, create_task, list_tasks, update_task, create_code_proposal, list_code_proposals, update_code_proposal_review, list_code_proposal_reviews
 
 app = FastAPI(
     title="GBSBFORYOU Universal AI Software Factory API",
@@ -414,6 +414,22 @@ def review_code_proposal(project_id: str, proposal_id: str, payload: dict):
     return {
         **proposal,
         "review_boundary": "Human decision only. No code was written to a workspace, executed, tested, merged, or deployed.",
+    }
+
+
+@app.get("/api/v1/projects/{project_id}/code-proposals/{proposal_id}/reviews", tags=["implementation"])
+def get_code_proposal_reviews(project_id: str, proposal_id: str):
+    """Return the append-only human decision history for a proposal."""
+    if get_project(project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    proposal = next((p for p in list_code_proposals(project_id) if p["id"] == proposal_id), None)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Code proposal not found")
+    return {
+        "project_id": project_id,
+        "proposal_id": proposal_id,
+        "reviews": list_code_proposal_reviews(project_id, proposal_id),
+        "review_boundary": "Audit history only. This does not execute, test, merge, or deploy proposal code.",
     }
 
 
