@@ -61,3 +61,17 @@ def test_project_brain_unknown_id_returns_404():
 
 def test_project_brain_limit_validation():
     assert client.get("/api/v1/projects", params={"limit": 101}).status_code == 422
+
+def test_ai_generate_rejects_unknown_provider():
+    response = client.post("/api/v1/ai/generate", json={"provider": "unknown", "prompt": "hello"})
+    assert response.status_code == 422
+
+def test_ai_generate_rejects_empty_prompt():
+    response = client.post("/api/v1/ai/generate", json={"provider": "openai", "prompt": "  "})
+    assert response.status_code == 422
+
+def test_ai_generate_reports_unconfigured_provider(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    response = client.post("/api/v1/ai/generate", json={"provider": "openai", "prompt": "Write a hello world app"})
+    assert response.status_code == 503
+    assert "not configured" in response.json()["detail"]
