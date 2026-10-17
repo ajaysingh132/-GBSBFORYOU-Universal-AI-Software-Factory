@@ -83,9 +83,9 @@ def test_ai_blueprint_validates_project_goal():
     })
     assert response.status_code == 503 or response.status_code == 200
 
-def test_ai_blueprint_uses_provider_and_marks_output_as_plan(monkeypatch):
-    import asyncio
+def test_ai_blueprint_uses_provider_and_marks_output_as_plan(monkeypatch, tmp_path):
     import app.main as main_module
+    monkeypatch.setenv("FACTORY_DB_PATH", str(tmp_path / "blueprints.db"))
     async def fake_generate(provider, prompt):
         assert provider == "openai"
         assert "Do not claim repositories were inspected" in prompt
@@ -110,3 +110,21 @@ def test_ai_blueprint_rejects_unsupported_provider():
         "provider": "unsupported"
     })
     assert response.status_code == 422
+
+
+def test_blueprint_history_requires_existing_project(tmp_path, monkeypatch):
+    monkeypatch.setenv("FACTORY_DB_PATH", str(tmp_path / "history.db"))
+    response = client.get("/api/v1/projects/missing-project/blueprints")
+    assert response.status_code == 404
+
+
+def test_project_store_saves_and_lists_blueprints(tmp_path, monkeypatch):
+    from app.project_store import create_project, save_blueprint, list_blueprints
+    monkeypatch.setenv("FACTORY_DB_PATH", str(tmp_path / "store-blueprints.db"))
+    project = create_project("Studio", "Build a video tool", [], [])
+    saved = save_blueprint(project["id"], "openai", "test-model", "Milestone plan", "Plan only")
+    assert saved is not None
+    history = list_blueprints(project["id"])
+    assert len(history) == 1
+    assert history[0]["content"] == "Milestone plan"
+    assert history[0]["provider"] == "openai"
