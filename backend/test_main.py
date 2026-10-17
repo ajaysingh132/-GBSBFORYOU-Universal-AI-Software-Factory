@@ -258,3 +258,52 @@ def test_capabilities_do_not_list_existing_provider_adapters_as_planned():
     assert "server-side AI text generation adapters for five providers" in data["implemented"]
     assert "real LLM adapters" not in data["planned"]
     assert "persistent project brain" not in data["planned"]
+
+
+
+def test_code_proposal_is_saved_as_review_only_artifact(monkeypatch, tmp_path):
+    import app.main as main_module
+    from app.project_store import create_project, create_task
+    monkeypatch.setenv("FACTORY_DB_PATH", str(tmp_path / "code-proposals.db"))
+    project = create_project("Factory", "Build a testable software factory", [], [])
+    task = create_task(project["id"], "Add a health endpoint test", "Write a focused API test")
+
+    async def fake_generate(provider, prompt):
+        assert "review-only code proposal" in prompt
+        return {
+            "provider": provider, "model": "test-model",
+            "text": '[{"path":"backend/test_health.py","content":"def test_health():\\n    assert True\\n"}]'
+        }
+
+    monkeypatch.setattr(main_module, "generate_text", fake_generate)
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/tasks/{task['id']}/code-proposals",
+        json={"provider": "openai"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "proposed"
+    assert data["files"][0]["path"] == "backend/test_health.py"
+    assert "not written" in data["evidence_note"]
+    listed = client.get(f"/api/v1/projects/{project['id']}/code-proposals")
+    assert listed.status_code == 200
+    assert listed.json()["proposals"][0]["id"] == data["id"]
+
+
+def test_code_proposal_rejects_path_traversal_without_saving(monkeypatch, tmp_path):
+    import app.main as main_module
+    from app.project_store import create_project, create_task
+    monkeypatch.setenv("FACTORY_DB_PATH", str(tmp_path / "unsafe-proposal.db"))
+    project = create_project("Factory", "Build a testable software factory", [], [])
+    task = create_task(project["id"], "Add a test", "Create a test file")
+
+    async def fake_generate(provider, prompt):
+        return {"provider": provider, "model": "test-model", "text": '[{"path":"../outside.py","content":"unsafe"}]'}
+
+    monkeypatch.setattr(main_module, "generate_text", fake_generate)
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/tasks/{task['id']}/code-proposals",
+        json={"provider": "openai"},
+    )
+    assert response.status_code == 502
+    assert client.get(f"/api/v1/projects/{project['id']}/code-proposals").json()["proposals"] == []
