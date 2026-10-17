@@ -284,7 +284,7 @@ async def create_tasks_from_blueprint(project_id: str, payload: dict):
         "Return ONLY a JSON array, each item with string keys title and description. "
         "Titles must be concise, testable and distinct. Do not claim any task is completed or verified. "
         "Include research/license review, architecture, implementation, tests and deployment-readiness where relevant. "
-        "Project goal: " + project["goal"] + "\\nBlueprint: " + blueprint[:14000]
+        "Project goal: " + project["goal"] + "\nBlueprint: " + blueprint[:14000]
     )
     try:
         result = await generate_text(provider, instruction)
@@ -296,7 +296,7 @@ async def create_tasks_from_blueprint(project_id: str, payload: dict):
     try:
         text_value = result["text"].strip()
         if text_value.startswith("```"):
-            text_value = text_value.split("\\n", 1)[-1]
+            text_value = text_value.split("\n", 1)[-1]
             if text_value.endswith("```"):
                 text_value = text_value[:-3].strip()
         start, end = text_value.find("["), text_value.rfind("]")
