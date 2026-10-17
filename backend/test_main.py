@@ -400,3 +400,51 @@ def test_code_proposal_download_returns_404_for_unknown_proposal(tmp_path, monke
         f"/api/v1/projects/{project['id']}/code-proposals/not-a-proposal/download"
     )
     assert response.status_code == 404
+
+
+def test_code_proposal_review_decision_is_persisted_and_does_not_claim_testing(monkeypatch, tmp_path):
+    import app.main as main_module
+    from app.project_store import create_project, create_task
+    monkeypatch.setenv("FACTORY_DB_PATH", str(tmp_path / "proposal-review.db"))
+    project = create_project("Factory", "Build a testable software factory", [], [])
+    task = create_task(project["id"], "Add a health test")
+
+    async def fake_generate(provider, prompt):
+        return {
+            "provider": provider, "model": "test-model",
+            "text": '[{"path":"backend/test_health.py","content":"def test_health():\\n    assert True\\n"}]'
+        }
+
+    monkeypatch.setattr(main_module, "generate_text", fake_generate)
+    created = client.post(
+        f"/api/v1/projects/{project['id']}/tasks/{task['id']}/code-proposals",
+        json={"provider": "openai"},
+    )
+    assert created.status_code == 200
+    proposal_id = created.json()["id"]
+
+    reviewed = client.patch(
+        f"/api/v1/projects/{project['id']}/code-proposals/{proposal_id}/review",
+        json={"status": "accepted_for_testing", "review_note": "Human review: ready for isolated tests."},
+    )
+    assert reviewed.status_code == 200
+    assert reviewed.json()["status"] == "accepted_for_testing"
+    assert "No code was written" in reviewed.json()["review_boundary"]
+    listed = client.get(f"/api/v1/projects/{project['id']}/code-proposals")
+    assert listed.status_code == 200
+    assert listed.json()["proposals"][0]["status"] == "accepted_for_testing"
+    manifest = client.get(
+        f"/api/v1/projects/{project['id']}/code-proposals/{proposal_id}/manifest"
+    ).json()
+    assert manifest["checks"]["automated_tests"] == "not_run"
+
+
+def test_code_proposal_review_rejects_invalid_status(tmp_path, monkeypatch):
+    from app.project_store import create_project
+    monkeypatch.setenv("FACTORY_DB_PATH", str(tmp_path / "invalid-review.db"))
+    project = create_project("Factory", "Build a testable software factory", [], [])
+    response = client.patch(
+        f"/api/v1/projects/{project['id']}/code-proposals/not-real/review",
+        json={"status": "deployed"},
+    )
+    assert response.status_code == 422
