@@ -39,6 +39,20 @@ def _connect():
         )
     """)
     connection.execute("""
+        CREATE TABLE IF NOT EXISTS code_proposals (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            files_json TEXT NOT NULL,
+            status TEXT NOT NULL,
+            evidence_note TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES projects(id)
+        )
+    """)
+    connection.execute("""
         CREATE TABLE IF NOT EXISTS project_tasks (
             id TEXT PRIMARY KEY,
             project_id TEXT NOT NULL,
@@ -174,3 +188,46 @@ def update_task(project_id: str, task_id: str, status: str, evidence: str = "") 
         )
         updated = db.execute("SELECT * FROM project_tasks WHERE id = ?", (task_id,)).fetchone()
     return dict(updated)
+
+
+
+def create_code_proposal(project_id: str, task_id: str, provider: str, model: str, files: list[dict], evidence_note: str) -> dict | None:
+    now = datetime.now(timezone.utc).isoformat()
+    proposal = {
+        "id": str(uuid.uuid4()), "project_id": project_id, "task_id": task_id,
+        "provider": provider, "model": model, "files": files,
+        "status": "proposed", "evidence_note": evidence_note, "created_at": now,
+    }
+    with _connect() as db:
+        task = db.execute(
+            "SELECT id FROM project_tasks WHERE id = ? AND project_id = ?",
+            (task_id, project_id),
+        ).fetchone()
+        if not task:
+            return None
+        db.execute(
+            "INSERT INTO code_proposals VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (proposal["id"], project_id, task_id, provider, model,
+             json.dumps(files, ensure_ascii=False), proposal["status"], evidence_note, now),
+        )
+    return proposal
+
+
+def list_code_proposals(project_id: str, task_id: str | None = None) -> list[dict]:
+    with _connect() as db:
+        if task_id:
+            rows = db.execute(
+                "SELECT * FROM code_proposals WHERE project_id = ? AND task_id = ? ORDER BY created_at DESC",
+                (project_id, task_id),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT * FROM code_proposals WHERE project_id = ? ORDER BY created_at DESC",
+                (project_id,),
+            ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["files"] = json.loads(item.pop("files_json"))
+        result.append(item)
+    return result
