@@ -56,6 +56,49 @@ async def ai_generate(payload: dict):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@app.post("/api/v1/projects/blueprint", tags=["projects"])
+async def create_ai_blueprint(payload: dict):
+    name = payload.get("name", "")
+    goal = payload.get("goal", "")
+    provider = payload.get("provider", "")
+    constraints = payload.get("constraints", [])
+    allowed = {"openai", "anthropic", "google_gemini", "deepseek", "openrouter"}
+    if not isinstance(name, str) or not 2 <= len(name.strip()) <= 100:
+        raise HTTPException(status_code=422, detail="name must contain 2–100 characters.")
+    if not isinstance(goal, str) or not 10 <= len(goal.strip()) <= 5000:
+        raise HTTPException(status_code=422, detail="goal must contain 10–5000 characters.")
+    if provider not in allowed:
+        raise HTTPException(status_code=422, detail="Unsupported provider.")
+    if not isinstance(constraints, list) or any(not isinstance(x, str) for x in constraints[:30]):
+        raise HTTPException(status_code=422, detail="constraints must be a list of text values.")
+    instruction = (
+        "You are the planning engine of GBSBFORYOU Universal AI Software Factory. "
+        "Create a concrete, staged implementation blueprint for the user's software project. "
+        "Use headings: Goal and acceptance criteria; Existing repositories to inspect; "
+        "Recommended architecture; Reusable tools and libraries to research; "
+        "Milestones; Test and security plan; Risks and unknowns. "
+        "Prefer free/open-source options when suitable, but never claim a tool is free without evidence. "
+        "Do not claim repositories were inspected, code was written, tests passed, or deployment occurred. "
+        "Label assumptions and verification tasks explicitly. Do not include secrets or ask users to paste API keys.\n\n"
+        f"Project name: {name.strip()}\nGoal: {goal.strip()}\n"
+        f"Constraints: {', '.join(constraints[:30]) if constraints else 'None supplied'}"
+    )
+    try:
+        result = await generate_text(provider, instruction)
+        return {
+            "project_name": name.strip(),
+            "provider": result["provider"],
+            "model": result["model"],
+            "status": "generated",
+            "blueprint": result["text"],
+            "evidence_note": "This is an AI-generated plan, not proof that repositories were inspected, code was generated, tests passed, or deployment succeeded."
+        }
+    except ProviderNotImplemented as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @app.get("/api/v1/capabilities", tags=["system"])
 def capabilities():
     return {
@@ -67,7 +110,7 @@ def capabilities():
             "SQLite persistent project brain",
             "public GitHub repository metadata analyzer",
             "source-linked public GitHub repository research",
-            "server-side AI text generation adapters for five providers",
+            "server-side AI text generation adapters for five providers",\n            "AI-generated project blueprint endpoint (plan only)",
         ],
         "planned": [
             "GitHub OAuth and private repository inventory",
