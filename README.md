@@ -16,7 +16,7 @@
 ## Repository structure
 - `frontend/` — React + TypeScript + Vite responsive PWA.
 - `backend/app/` — FastAPI API, request/response schemas, SQLite project brain, public repository analyzer, external GitHub research and server-side AI provider adapters.
-- `backend/test_main.py` — API smoke tests.
+- `backend/test_main.py` — API and persistence tests.
 - `docs/ARCHITECTURE.md` — architecture and staged implementation.
 - `docs/REPOSITORY_RESEARCH_TEMPLATE.md` — evidence-first review template.
 - `.github/workflows/ci.yml` — backend tests and frontend build.
@@ -41,7 +41,8 @@ npm run dev -- --host 0.0.0.0
 ```
 Set `VITE_API_BASE_URL` if the API is not on localhost:8000. PWA installability requires HTTPS or localhost.
 
-## AI provider setup\nThe `/api/v1/ai/generate` endpoint supports OpenAI, Anthropic, Google Gemini, DeepSeek and OpenRouter adapters. Set the relevant provider API key as a backend environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, or `OPENROUTER_API_KEY`). Optional model overrides use `OPENAI_MODEL`, `ANTHROPIC_MODEL`, `GOOGLE_GEMINI_MODEL`, `DEEPSEEK_MODEL`, and `OPENROUTER_MODEL`. Provider availability, model names, account permissions and billing vary; an adapter does not imply a free plan. Never place keys in frontend code.\n\n## Security and evidence rules
+## Project Brain and blueprint history
+The SQLite Project Brain stores project metadata and AI-generated blueprint records. A successful `/api/v1/projects/blueprint` response creates a project record and saves the generated blueprint; `GET /api/v1/projects/{project_id}/blueprints` returns its saved blueprint history. The default SQLite file is local to the backend process (`data/factory.db`) unless `FACTORY_DB_PATH` is configured. This is a single-instance MVP, not a multi-user production database; authentication and per-user access controls are not yet implemented.\n\n## AI provider setup\nThe `/api/v1/ai/generate` endpoint supports OpenAI, Anthropic, Google Gemini, DeepSeek and OpenRouter adapters. Set the relevant provider API key as a backend environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, or `OPENROUTER_API_KEY`). Optional model overrides use `OPENAI_MODEL`, `ANTHROPIC_MODEL`, `GOOGLE_GEMINI_MODEL`, `DEEPSEEK_MODEL`, and `OPENROUTER_MODEL`. Provider availability, model names, account permissions and billing vary; an adapter does not imply a free plan. Never place keys in frontend code.\n\n## Security and evidence rules
 - Never put model/GitHub secrets in browser code or commit them.
 - Only inspect repositories the user has authorized; minimize permissions.
 - Do not execute untrusted repository code in the API process.
