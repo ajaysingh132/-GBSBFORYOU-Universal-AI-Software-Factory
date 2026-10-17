@@ -64,6 +64,20 @@ def _connect():
         )
     """)
     connection.execute("""
+        CREATE TABLE IF NOT EXISTS worker_jobs (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            proposal_id TEXT NOT NULL,
+            state TEXT NOT NULL,
+            manifest_sha256 TEXT NOT NULL,
+            manifest_json TEXT NOT NULL,
+            result_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES projects(id)
+        )
+    """)
+    connection.execute("""
         CREATE TABLE IF NOT EXISTS project_tasks (
             id TEXT PRIMARY KEY,
             project_id TEXT NOT NULL,
@@ -257,6 +271,51 @@ def update_code_proposal_review(project_id: str, proposal_id: str, status: str, 
         ).fetchone()
     item = dict(updated)
     item["files"] = json.loads(item.pop("files_json"))
+    return item
+
+
+def enqueue_worker_job(project_id: str, proposal_id: str, manifest: dict) -> dict | None:
+    """Queue metadata only; no worker is started and no proposal code is executed."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as db:
+        proposal = db.execute(
+            "SELECT id, status FROM code_proposals WHERE id = ? AND project_id = ?",
+            (proposal_id, project_id),
+        ).fetchone()
+        if not proposal:
+            return None
+        if proposal["status"] != "accepted_for_testing":
+            raise ValueError("Proposal must be accepted_for_testing before it can be queued.")
+        job = {
+            "id": str(uuid.uuid4()),
+            "project_id": project_id,
+            "proposal_id": proposal_id,
+            "state": "queued",
+            "manifest_sha256": manifest["manifest_sha256"],
+            "manifest": manifest,
+            "result": {},
+            "created_at": now,
+            "updated_at": now,
+        }
+        db.execute(
+            "INSERT INTO worker_jobs (id, project_id, proposal_id, state, manifest_sha256, manifest_json, result_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (job["id"], project_id, proposal_id, job["state"], job["manifest_sha256"],
+             json.dumps(manifest, ensure_ascii=False, sort_keys=True), "{}", now, now),
+        )
+    return job
+
+
+def get_worker_job(project_id: str, job_id: str) -> dict | None:
+    with _connect() as db:
+        row = db.execute(
+            "SELECT * FROM worker_jobs WHERE id = ? AND project_id = ?",
+            (job_id, project_id),
+        ).fetchone()
+    if not row:
+        return None
+    item = dict(row)
+    item["manifest"] = json.loads(item.pop("manifest_json"))
+    item["result"] = json.loads(item.pop("result_json"))
     return item
 
 
