@@ -5,7 +5,7 @@ from .schemas import ProjectPlanRequest, ProjectPlanResponse, PlanStep
 from .providers import configured_providers, generate_text, ProviderNotImplemented
 from .repository_intel import analyze_public_repository, RepositoryAnalysisError
 from .external_research import search_github_repositories, ResearchError
-from .project_store import create_project, list_projects, get_project, save_blueprint, list_blueprints, create_task, list_tasks, update_task
+from .project_store import create_project, list_projects, get_project, save_blueprint, list_blueprints, create_task, list_tasks, update_task, create_code_proposal, list_code_proposals
 
 app = FastAPI(
     title="GBSBFORYOU Universal AI Software Factory API",
@@ -317,6 +317,80 @@ async def create_tasks_from_blueprint(project_id: str, payload: dict):
         if task:
             created.append(task)
     return {"project_id": project_id, "provider": result["provider"], "model": result["model"], "created_count": len(created), "tasks": created, "status": "proposed", "evidence_note": "AI-proposed tasks only; each task requires implementation and evidence before verification."}
+
+
+@app.post("/api/v1/projects/{project_id}/tasks/{task_id}/code-proposals", tags=["implementation"])
+async def generate_code_proposal(project_id: str, task_id: str, payload: dict):
+    """Generate review-only file proposals; never writes to disk or executes generated code."""
+    project = get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    task = next((item for item in list_tasks(project_id) if item["id"] == task_id), None)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    blueprints = list_blueprints(project_id)
+    provider = payload.get("provider", blueprints[0]["provider"] if blueprints else "")
+    allowed = {"openai", "anthropic", "google_gemini", "deepseek", "openrouter"}
+    if provider not in allowed:
+        raise HTTPException(status_code=422, detail="A supported provider is required; save a blueprint or supply provider.")
+    blueprint = blueprints[0]["content"][:9000] if blueprints else "No saved blueprint."
+    instruction = (
+        "Generate a review-only code proposal for one software task. Return ONLY a JSON array of objects "
+        'with "path" and "content" string fields. Return 1 to 10 files, no markdown fences. '
+        "Do not claim files were written, code was run, or tests passed. Do not include secrets, credentials, "
+        "private keys, .env files, lockfiles, or binary data. Use relative repository paths only; never use "
+        "absolute paths, .. path segments, or paths beginning with a dot. Keep each file under 20000 characters "
+        "and all file contents together under 60000 characters. Prefer a minimal, testable change.\n\n"
+        f"Project: {project['name']}\nGoal: {project['goal']}\n"
+        f"Task: {task['title']}\nTask description: {task['description']}\n"
+        f"Latest blueprint: {blueprint}"
+    )
+    try:
+        result = await generate_text(provider, instruction)
+        raw = result["text"].strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1] if "\n" in raw else raw
+            if raw.rstrip().endswith("```"):
+                raw = raw.rstrip()[:-3].strip()
+        start, end = raw.find("["), raw.rfind("]")
+        files = json.loads(raw[start:end + 1]) if start >= 0 and end > start else None
+        if not isinstance(files, list) or not 1 <= len(files) <= 10:
+            raise ValueError("Expected 1–10 proposed files.")
+        validated = []
+        total_chars = 0
+        for item in files:
+            if not isinstance(item, dict) or not isinstance(item.get("path"), str) or not isinstance(item.get("content"), str):
+                raise ValueError("Each file requires text path and content fields.")
+            path = item["path"].replace("\\", "/")
+            parts = path.split("/")
+            if (not path or path.startswith("/") or any(part in {"", ".", ".."} for part in parts)
+                or any(part.startswith(".") for part in parts)
+                or path.lower().endswith((".pem", ".key", ".p12", ".pfx"))
+                or path.lower().split("/")[-1] in {".env", "id_rsa", "id_ed25519"}):
+                raise ValueError("Unsafe or hidden file path in provider output.")
+            body = item["content"]
+            if len(body) > 20000:
+                raise ValueError("Each proposed file must be 20000 characters or fewer.")
+            total_chars += len(body)
+            if total_chars > 60000:
+                raise ValueError("Combined proposed file content exceeds 60000 characters.")
+            if any(existing["path"] == path for existing in validated):
+                raise ValueError("Duplicate file paths are not allowed.")
+            validated.append({"path": path, "content": body})
+    except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=502, detail="Provider returned an invalid or unsafe code proposal; nothing was written or executed.") from exc
+    note = "AI-generated review proposal only. Files were not written to a workspace, executed, tested, or committed. Human review and isolated verification are required."
+    proposal = create_code_proposal(project_id, task_id, result["provider"], result["model"], validated, note)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return proposal
+
+
+@app.get("/api/v1/projects/{project_id}/code-proposals", tags=["implementation"])
+def get_project_code_proposals(project_id: str, task_id: str | None = None):
+    if get_project(project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"project_id": project_id, "proposals": list_code_proposals(project_id, task_id)}
 
 
 @app.get("/api/v1/projects/{project_id}/tasks", tags=["tasks"])
