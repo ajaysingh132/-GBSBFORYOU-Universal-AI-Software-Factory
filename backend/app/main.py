@@ -1,3 +1,4 @@
+import json
 import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -208,6 +209,7 @@ def capabilities():
             "server-side AI text generation adapters for five providers",
             "AI-generated project blueprint endpoint with persistence",
             "persistent project task tracking with evidence-gated verification",
+            "AI-generated review-only code proposals with path and size validation",
         ],
         "planned": [
             "GitHub OAuth and private repository inventory",
