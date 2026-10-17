@@ -1,6 +1,9 @@
+import io
 import json
 import os
+import zipfile
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from .schemas import ProjectPlanRequest, ProjectPlanResponse, PlanStep
 from .code_proposal_tools import build_proposal_manifest
@@ -406,6 +409,41 @@ def get_code_proposal_manifest(project_id: str, proposal_id: str):
     except ValueError as exc:
         raise HTTPException(status_code=409, detail="Saved proposal failed manifest validation.") from exc
     return {"project_id": project_id, "proposal_id": proposal_id, **manifest}
+
+
+@app.get("/api/v1/projects/{project_id}/code-proposals/{proposal_id}/download", tags=["implementation"])
+def download_code_proposal(project_id: str, proposal_id: str):
+    """Export proposal as a review-only ZIP; never execute generated content."""
+    if get_project(project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    proposal = next(
+        (item for item in list_code_proposals(project_id) if item["id"] == proposal_id),
+        None,
+    )
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Code proposal not found")
+    try:
+        build_proposal_manifest(proposal["files"])
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="Saved proposal failed validation.") from exc
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "REVIEW_REQUIRED.txt",
+            "AI-generated source proposal. NOT tested or verified. Review before use. "
+            "Do not execute until checked in an isolated build environment.\n",
+        )
+        for item in proposal["files"]:
+            archive.writestr("proposed/" + item["path"], item["content"])
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="code-proposal-{proposal_id}.zip"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @app.get("/api/v1/projects/{project_id}/code-proposals", tags=["implementation"])
