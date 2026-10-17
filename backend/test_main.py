@@ -99,7 +99,9 @@ def test_ai_blueprint_uses_provider_and_marks_output_as_plan(monkeypatch, tmp_pa
     })
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "generated"
+    assert data["status"] == "generated_and_saved"
+    assert data["project_id"]
+    assert data["blueprint_id"]
     assert data["provider"] == "openai"
     assert "not proof" in data["evidence_note"]
 
