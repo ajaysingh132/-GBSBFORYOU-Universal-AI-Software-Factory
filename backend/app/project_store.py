@@ -38,6 +38,19 @@ def _connect():
             FOREIGN KEY(project_id) REFERENCES projects(id)
         )
     """)
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS project_tasks (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            status TEXT NOT NULL,
+            evidence TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES projects(id)
+        )
+    """)
     return connection
 
 def create_project(name: str, goal: str, constraints: list[str], repository_urls: list[str]) -> dict:
@@ -110,3 +123,54 @@ def list_blueprints(project_id: str) -> list[dict]:
             (project_id,),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+TASK_STATUSES = {"proposed", "in_progress", "blocked", "verified"}
+
+
+def create_task(project_id: str, title: str, description: str = "") -> dict | None:
+    now = datetime.now(timezone.utc).isoformat()
+    task = {
+        "id": str(uuid.uuid4()), "project_id": project_id, "title": title.strip(),
+        "description": description.strip(), "status": "proposed", "evidence": "",
+        "created_at": now, "updated_at": now,
+    }
+    with _connect() as db:
+        if not db.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone():
+            return None
+        db.execute(
+            "INSERT INTO project_tasks VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (task["id"], project_id, task["title"], task["description"], task["status"],
+             task["evidence"], now, now),
+        )
+    return task
+
+
+def list_tasks(project_id: str) -> list[dict]:
+    with _connect() as db:
+        rows = db.execute(
+            "SELECT * FROM project_tasks WHERE project_id = ? ORDER BY created_at ASC",
+            (project_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def update_task(project_id: str, task_id: str, status: str, evidence: str = "") -> dict | None:
+    if status not in TASK_STATUSES:
+        raise ValueError("status must be proposed, in_progress, blocked, or verified")
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as db:
+        row = db.execute(
+            "SELECT * FROM project_tasks WHERE id = ? AND project_id = ?",
+            (task_id, project_id),
+        ).fetchone()
+        if not row:
+            return None
+        if status == "verified" and not evidence.strip():
+            raise ValueError("evidence is required before marking a task verified")
+        db.execute(
+            "UPDATE project_tasks SET status = ?, evidence = ?, updated_at = ? WHERE id = ?",
+            (status, evidence.strip(), now, task_id),
+        )
+        updated = db.execute("SELECT * FROM project_tasks WHERE id = ?", (task_id,)).fetchone()
+    return dict(updated)
