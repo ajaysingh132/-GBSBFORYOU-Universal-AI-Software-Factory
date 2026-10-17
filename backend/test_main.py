@@ -439,6 +439,44 @@ def test_code_proposal_review_decision_is_persisted_and_does_not_claim_testing(m
     assert manifest["checks"]["automated_tests"] == "not_run"
 
 
+def test_code_proposal_review_history_is_append_only(monkeypatch, tmp_path):
+    import app.main as main_module
+    from app.project_store import create_project, create_task
+    monkeypatch.setenv("FACTORY_DB_PATH", str(tmp_path / "proposal-review-history.db"))
+    project = create_project("Factory", "Build a testable software factory", [], [])
+    task = create_task(project["id"], "Add a health test")
+
+    async def fake_generate(provider, prompt):
+        return {
+            "provider": provider, "model": "test-model",
+            "text": '[{"path":"backend/test_health.py","content":"def test_health():\\n    assert True\\n"}]'
+        }
+
+    monkeypatch.setattr(main_module, "generate_text", fake_generate)
+    created = client.post(
+        f"/api/v1/projects/{project['id']}/tasks/{task['id']}/code-proposals",
+        json={"provider": "openai"},
+    )
+    assert created.status_code == 200
+    proposal_id = created.json()["id"]
+    base = f"/api/v1/projects/{project['id']}/code-proposals/{proposal_id}/review"
+
+    first = client.patch(base, json={"status": "accepted_for_testing", "review_note": "Initial review"})
+    second = client.patch(base, json={"status": "rejected", "review_note": "Later review found issues"})
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    history = client.get(
+        f"/api/v1/projects/{project['id']}/code-proposals/{proposal_id}/reviews"
+    )
+    assert history.status_code == 200
+    data = history.json()
+    assert len(data["reviews"]) == 2
+    assert {item["status"] for item in data["reviews"]} == {"accepted_for_testing", "rejected"}
+    assert {item["review_note"] for item in data["reviews"]} == {"Initial review", "Later review found issues"}
+    assert "does not execute" in data["review_boundary"]
+
+
 def test_code_proposal_review_rejects_invalid_status(tmp_path, monkeypatch):
     from app.project_store import create_project
     monkeypatch.setenv("FACTORY_DB_PATH", str(tmp_path / "invalid-review.db"))
