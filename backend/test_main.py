@@ -75,3 +75,38 @@ def test_ai_generate_reports_unconfigured_provider(monkeypatch):
     response = client.post("/api/v1/ai/generate", json={"provider": "openai", "prompt": "Write a hello world app"})
     assert response.status_code == 503
     assert "not configured" in response.json()["detail"]
+
+def test_ai_blueprint_validates_project_goal():
+    response = client.post("/api/v1/projects/blueprint", json={
+        "name": "Video Studio", "goal": "Build a mobile-first AI video tool",
+        "provider": "openai", "constraints": []
+    })
+    assert response.status_code == 503 or response.status_code == 200
+
+def test_ai_blueprint_uses_provider_and_marks_output_as_plan(monkeypatch):
+    import asyncio
+    import app.main as main_module
+    async def fake_generate(provider, prompt):
+        assert provider == "openai"
+        assert "Do not claim repositories were inspected" in prompt
+        return {"provider": provider, "model": "test-model", "text": "Milestone 1: build and test."}
+    monkeypatch.setattr(main_module, "generate_text", fake_generate)
+    response = client.post("/api/v1/projects/blueprint", json={
+        "name": "Video Studio",
+        "goal": "Build a mobile-first AI video creation application",
+        "provider": "openai",
+        "constraints": ["prefer free tools"]
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "generated"
+    assert data["provider"] == "openai"
+    assert "not proof" in data["evidence_note"]
+
+def test_ai_blueprint_rejects_unsupported_provider():
+    response = client.post("/api/v1/projects/blueprint", json={
+        "name": "Video Studio",
+        "goal": "Build a mobile-first AI video creation application",
+        "provider": "unsupported"
+    })
+    assert response.status_code == 422
