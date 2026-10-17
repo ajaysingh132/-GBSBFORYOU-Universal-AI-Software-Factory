@@ -53,6 +53,17 @@ def _connect():
         )
     """)
     connection.execute("""
+        CREATE TABLE IF NOT EXISTS code_proposal_reviews (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            proposal_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            review_note TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES projects(id)
+        )
+    """)
+    connection.execute("""
         CREATE TABLE IF NOT EXISTS project_tasks (
             id TEXT PRIMARY KEY,
             project_id TEXT NOT NULL,
@@ -227,13 +238,18 @@ def update_code_proposal_review(project_id: str, proposal_id: str, status: str, 
         ).fetchone()
         if not row:
             return None
+        effective_note = review_note.strip() or (
+            "Human review decision recorded: accepted for isolated testing only; no execution, tests, merge, or deployment occurred."
+            if status == "accepted_for_testing"
+            else "Human review decision recorded: rejected; no execution, tests, merge, or deployment occurred."
+        )
         db.execute(
             "UPDATE code_proposals SET status = ?, evidence_note = ? WHERE id = ? AND project_id = ?",
-            (status, review_note.strip() or (
-                "Human review decision recorded: accepted for isolated testing only; no execution, tests, merge, or deployment occurred."
-                if status == "accepted_for_testing"
-                else "Human review decision recorded: rejected; no execution, tests, merge, or deployment occurred."
-            ), proposal_id, project_id),
+            (status, effective_note, proposal_id, project_id),
+        )
+        db.execute(
+            "INSERT INTO code_proposal_reviews (id, project_id, proposal_id, status, review_note, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (str(uuid.uuid4()), project_id, proposal_id, status, effective_note, datetime.now(timezone.utc).isoformat()),
         )
         updated = db.execute(
             "SELECT * FROM code_proposals WHERE id = ? AND project_id = ?",
@@ -242,6 +258,18 @@ def update_code_proposal_review(project_id: str, proposal_id: str, status: str, 
     item = dict(updated)
     item["files"] = json.loads(item.pop("files_json"))
     return item
+
+
+def list_code_proposal_reviews(project_id: str, proposal_id: str) -> list[dict]:
+    """Return append-only review decisions for one proposal, newest first."""
+    with _connect() as db:
+        rows = db.execute(
+            "SELECT id, project_id, proposal_id, status, review_note, created_at "
+            "FROM code_proposal_reviews WHERE project_id = ? AND proposal_id = ? "
+            "ORDER BY created_at DESC",
+            (project_id, proposal_id),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def list_code_proposals(project_id: str, task_id: str | None = None) -> list[dict]:
