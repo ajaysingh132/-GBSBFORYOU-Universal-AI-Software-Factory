@@ -26,6 +26,18 @@ def _connect():
             updated_at TEXT NOT NULL
         )
     """)
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS blueprints (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            content TEXT NOT NULL,
+            evidence_note TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES projects(id)
+        )
+    """)
     return connection
 
 def create_project(name: str, goal: str, constraints: list[str], repository_urls: list[str]) -> dict:
@@ -70,3 +82,31 @@ def _row_to_project(row) -> dict:
         "status": row["status"], "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+
+
+def save_blueprint(project_id: str, provider: str, model: str, content: str, evidence_note: str) -> dict | None:
+    now = datetime.now(timezone.utc).isoformat()
+    blueprint = {
+        "id": str(uuid.uuid4()), "project_id": project_id,
+        "provider": provider, "model": model, "content": content,
+        "evidence_note": evidence_note, "created_at": now,
+    }
+    with _connect() as db:
+        exists = db.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if not exists:
+            return None
+        db.execute(
+            "INSERT INTO blueprints VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (blueprint["id"], project_id, provider, model, content, evidence_note, now),
+        )
+        db.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (now, project_id))
+    return blueprint
+
+
+def list_blueprints(project_id: str) -> list[dict]:
+    with _connect() as db:
+        rows = db.execute(
+            "SELECT * FROM blueprints WHERE project_id = ? ORDER BY created_at DESC",
+            (project_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
