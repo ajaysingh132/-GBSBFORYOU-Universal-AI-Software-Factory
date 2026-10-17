@@ -209,3 +209,31 @@ def test_project_task_rejects_unknown_status(tmp_path, monkeypatch):
     task = client.post(f"/api/v1/projects/{project['id']}/tasks", json={"title": "Inspect code"}).json()
     response = client.patch(f"/api/v1/projects/{project['id']}/tasks/{task['id']}", json={"status": "done"})
     assert response.status_code == 422
+
+
+def test_generate_tasks_from_saved_blueprint(monkeypatch, tmp_path):
+    import app.main as main_module
+    from app.project_store import create_project, save_blueprint
+    monkeypatch.setenv("FACTORY_DB_PATH", str(tmp_path / "generated-tasks.db"))
+    project = create_project("Video Studio", "Build a mobile-first video tool", [], [])
+    save_blueprint(project["id"], "openai", "test-model", "Architecture and test plan", "Plan only")
+
+    async def fake_generate(provider, prompt):
+        assert "Architecture and test plan" in prompt
+        return {"provider": provider, "model": "test-model", "text": '[{"title":"Review licenses","description":"Check dependencies"},{"title":"Add API tests","description":"Test endpoints"}]'}
+
+    monkeypatch.setattr(main_module, "generate_text", fake_generate)
+    response = client.post(f"/api/v1/projects/{project['id']}/tasks/from-blueprint", json={})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["created_count"] == 2
+    assert all(task["status"] == "proposed" for task in data["tasks"])
+    assert client.get(f"/api/v1/projects/{project['id']}/tasks").json()["tasks"][0]["title"] == "Review licenses"
+
+
+def test_generate_tasks_requires_saved_blueprint(tmp_path, monkeypatch):
+    from app.project_store import create_project
+    monkeypatch.setenv("FACTORY_DB_PATH", str(tmp_path / "no-blueprint.db"))
+    project = create_project("Video Studio", "Build a mobile-first video tool", [], [])
+    response = client.post(f"/api/v1/projects/{project['id']}/tasks/from-blueprint", json={})
+    assert response.status_code == 409
