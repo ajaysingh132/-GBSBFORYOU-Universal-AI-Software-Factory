@@ -24,7 +24,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )
 
@@ -215,7 +215,6 @@ def capabilities():
             "real LLM adapters",
             "REA runtime adapter",
             "isolated build/test workers",
-            "persistent project brain",
             "video/media generation",
         ],
     }
