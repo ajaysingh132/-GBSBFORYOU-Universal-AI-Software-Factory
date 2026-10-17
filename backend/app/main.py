@@ -212,7 +212,6 @@ def capabilities():
         "planned": [
             "GitHub OAuth and private repository inventory",
             "source-cited external research",
-            "real LLM adapters",
             "REA runtime adapter",
             "isolated build/test workers",
             "video/media generation",
