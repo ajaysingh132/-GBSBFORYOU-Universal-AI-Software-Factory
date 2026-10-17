@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .schemas import ProjectPlanRequest, ProjectPlanResponse, PlanStep
 from .providers import configured_providers
 from .repository_intel import analyze_public_repository, RepositoryAnalysisError
+from .external_research import search_github_repositories, ResearchError
 
 app = FastAPI(
     title="GBSBFORYOU Universal AI Software Factory API",
@@ -45,9 +46,10 @@ def capabilities():
             "capabilities",
             "project-plan scaffold",
             "public GitHub repository metadata analyzer",
+            "source-linked public GitHub repository research",
         ],
         "planned": [
-            "GitHub OAuth and repository inventory",
+            "GitHub OAuth and private repository inventory",
             "source-cited external research",
             "real LLM adapters",
             "REA runtime adapter",
@@ -56,6 +58,19 @@ def capabilities():
             "video/media generation",
         ],
     }
+
+
+@app.get("/api/v1/research/github", tags=["research"])
+async def research_github(q: str, limit: int = 8):
+    try:
+        return await search_github_repositories(q, limit)
+    except ResearchError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="GitHub search failed; retry later.",
+        ) from exc
 
 
 @app.post("/api/v1/repositories/analyze", tags=["repositories"])
