@@ -2,7 +2,8 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .schemas import ProjectPlanRequest, ProjectPlanResponse, PlanStep
-from .providers import configured_providers\nfrom .repository_intel import analyze_public_repository, RepositoryAnalysisError
+from .providers import configured_providers
+from .repository_intel import analyze_public_repository, RepositoryAnalysisError
 app = FastAPI(title="GBSBFORYOU Universal AI Software Factory API", version="0.1.0", description="Mobile-first, evidence-led software project planning API.")
 origins = [x.strip() for x in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if x.strip()]
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=False, allow_methods=["GET","POST"], allow_headers=["Content-Type","Authorization"])
