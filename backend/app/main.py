@@ -3,6 +3,7 @@ import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from .schemas import ProjectPlanRequest, ProjectPlanResponse, PlanStep
+from .code_proposal_tools import build_proposal_manifest
 from .providers import configured_providers, generate_text, ProviderNotImplemented
 from .repository_intel import analyze_public_repository, RepositoryAnalysisError
 from .external_research import search_github_repositories, ResearchError
@@ -210,6 +211,7 @@ def capabilities():
             "AI-generated project blueprint endpoint with persistence",
             "persistent project task tracking with evidence-gated verification",
             "AI-generated review-only code proposals with path and size validation",
+            "read-only code proposal manifest with SHA-256 file hashes",
         ],
         "planned": [
             "GitHub OAuth and private repository inventory",
@@ -381,11 +383,29 @@ async def generate_code_proposal(project_id: str, task_id: str, payload: dict):
             validated.append({"path": path, "content": body})
     except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=502, detail="Provider returned an invalid or unsafe code proposal; nothing was written or executed.") from exc
+    try:
+        build_proposal_manifest(validated)
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="Provider returned an unsafe proposal path or content; nothing was saved.") from exc
     note = "AI-generated review proposal only. Files were not written to a workspace, executed, tested, or committed. Human review and isolated verification are required."
     proposal = create_code_proposal(project_id, task_id, result["provider"], result["model"], validated, note)
     if proposal is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return proposal
+
+
+@app.get("/api/v1/projects/{project_id}/code-proposals/{proposal_id}/manifest", tags=["implementation"])
+def get_code_proposal_manifest(project_id: str, proposal_id: str):
+    if get_project(project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    proposal = next((p for p in list_code_proposals(project_id) if p["id"] == proposal_id), None)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Code proposal not found")
+    try:
+        manifest = build_proposal_manifest(proposal["files"])
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="Saved proposal failed manifest validation.") from exc
+    return {"project_id": project_id, "proposal_id": proposal_id, **manifest}
 
 
 @app.get("/api/v1/projects/{project_id}/code-proposals", tags=["implementation"])
