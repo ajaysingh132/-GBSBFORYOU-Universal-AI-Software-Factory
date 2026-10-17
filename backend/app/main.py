@@ -10,7 +10,7 @@ from .code_proposal_tools import build_proposal_manifest
 from .providers import configured_providers, generate_text, ProviderNotImplemented
 from .repository_intel import analyze_public_repository, RepositoryAnalysisError
 from .external_research import search_github_repositories, ResearchError
-from .project_store import create_project, list_projects, get_project, save_blueprint, list_blueprints, create_task, list_tasks, update_task, create_code_proposal, list_code_proposals
+from .project_store import create_project, list_projects, get_project, save_blueprint, list_blueprints, create_task, list_tasks, update_task, create_code_proposal, list_code_proposals, update_code_proposal_review
 
 app = FastAPI(
     title="GBSBFORYOU Universal AI Software Factory API",
@@ -395,6 +395,26 @@ async def generate_code_proposal(project_id: str, task_id: str, payload: dict):
     if proposal is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return proposal
+
+
+@app.patch("/api/v1/projects/{project_id}/code-proposals/{proposal_id}/review", tags=["implementation"])
+def review_code_proposal(project_id: str, proposal_id: str, payload: dict):
+    """Record an explicit human decision; never runs, merges, or deploys proposal code."""
+    if get_project(project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    status = payload.get("status", "")
+    review_note = payload.get("review_note", "")
+    if not isinstance(status, str) or status not in {"accepted_for_testing", "rejected"}:
+        raise HTTPException(status_code=422, detail="status must be accepted_for_testing or rejected.")
+    if not isinstance(review_note, str) or len(review_note) > 2000:
+        raise HTTPException(status_code=422, detail="review_note must be text up to 2000 characters.")
+    proposal = update_code_proposal_review(project_id, proposal_id, status, review_note)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Code proposal not found")
+    return {
+        **proposal,
+        "review_boundary": "Human decision only. No code was written to a workspace, executed, tested, merged, or deployed.",
+    }
 
 
 @app.get("/api/v1/projects/{project_id}/code-proposals/{proposal_id}/manifest", tags=["implementation"])
