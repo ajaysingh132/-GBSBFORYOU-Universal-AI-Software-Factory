@@ -237,3 +237,24 @@ def test_generate_tasks_requires_saved_blueprint(tmp_path, monkeypatch):
     project = create_project("Video Studio", "Build a mobile-first video tool", [], [])
     response = client.post(f"/api/v1/projects/{project['id']}/tasks/from-blueprint", json={})
     assert response.status_code == 409
+
+
+
+def test_task_patch_cors_preflight_allows_browser_updates():
+    response = client.options(
+        "/api/v1/projects/example/tasks/example",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "PATCH",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert response.status_code == 200
+    assert "PATCH" in response.headers["access-control-allow-methods"]
+
+
+def test_capabilities_do_not_list_existing_provider_adapters_as_planned():
+    data = client.get("/api/v1/capabilities").json()
+    assert "server-side AI text generation adapters for five providers" in data["implemented"]
+    assert "real LLM adapters" not in data["planned"]
+    assert "persistent project brain" not in data["planned"]
