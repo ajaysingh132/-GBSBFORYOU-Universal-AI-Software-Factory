@@ -110,7 +110,8 @@ def capabilities():
             "SQLite persistent project brain",
             "public GitHub repository metadata analyzer",
             "source-linked public GitHub repository research",
-            "server-side AI text generation adapters for five providers",\n            "AI-generated project blueprint endpoint (plan only)",
+            "server-side AI text generation adapters for five providers",
+            "AI-generated project blueprint endpoint (plan only)",
         ],
         "planned": [
             "GitHub OAuth and private repository inventory",
