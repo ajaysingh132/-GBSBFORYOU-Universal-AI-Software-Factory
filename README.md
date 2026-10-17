@@ -51,8 +51,16 @@ The SQLite Project Brain stores project metadata and AI-generated blueprint reco
 - Preserve upstream licenses and notices; evaluate code and model-weight licenses separately.
 - Human approval required before publishing, merging, deploying or spending money.
 
+## Current implementation status
+- Human code-proposal review decisions are persisted, with append-only review history.
+- SHA-256 proposal manifests and review-only ZIP downloads are available; generated files are not written to a project workspace by these features.
+- Test-job queue records are persisted in SQLite and can only be created after a proposal is accepted for testing.
+- The mobile UI can request a test-job queue record and shows that execution has not started.
+- Worker manifest/result validators and an isolated-worker security contract are present.
+- **Important limitation:** no isolated execution worker is connected yet. Queue records are not executed; build, automated tests and security scans remain not_run. Do not treat queued jobs or human review as verification evidence.
+
 ## Roadmap
-**M1:** PWA + planning API + tests (this foundation). **M2:** GitHub App/OAuth and repository inventory. **M3:** source-linked external research and evidence graph. **M4:** provider adapters and persistent project brain. **M5:** isolated build/test workers. **M6:** optional REA integration. **M7:** video/media providers, storage and FFmpeg workers. **M8:** deployment, monitoring and security review.
+**M1:** PWA + planning API + tests (foundation). **M2:** GitHub App/OAuth and repository inventory. **M3:** source-linked external research and evidence graph. **M4:** provider adapters and persistent project brain. **M5:** isolated worker runtime, authenticated job claiming, bounded execution, and trustworthy evidence ingestion (in progress). **M6:** optional REA integration. **M7:** video/media providers, storage and FFmpeg workers. **M8:** deployment, monitoring and security review.
 
 ## License
 MIT for original code in this repository. Third-party components and models retain their own licenses.
